@@ -1,0 +1,123 @@
+---
+title: "Exercise Prediction - PML Project"
+author: "Philip Mateescu"
+date: "January 29, 2016"
+output: html_document
+---
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+library(dplyr)
+library(caret)
+library(pgmm)
+library(rpart)
+library(gbm)
+library(lubridate)
+library(forecast)
+library(e1071)
+library(randomForest)
+library(gridExtra)
+```
+
+# Using Machine Learning to Predict Exercise Correctness 
+
+Using fitness device (*Jawbone Up*, *Nike FuelBand*, *Fitbit*) 
+[data collected](http://groupware.les.inf.puc-rio.br/har) by a group 
+of enthusiasts, we will attempt to construct a Machine Learning
+model that will predict "how (well)" an activity has been performed
+by the weared.
+
+The dataset has been obtained from the [Human Activity Recognition](http://groupware.les.inf.puc-rio.br/har) project.
+
+## Dataset Cleanup and Exploratory Analysis
+
+The training data has been obtained from
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+and the test data has been downloaded from
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+Both files have been places in a `data` subdirectory.
+
+```{r}
+training <- read.csv('data/pml-training.csv')
+training$classe <- as.factor(training$classe)
+testing <- read.csv('data/pml-testing.csv')
+```
+
+From the study's [documentation](http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf), we learned that the authors have added eight feature
+that are calculate values of other variables: mean, variance,
+standard deviation, max, min, amplitude, kurtosis and skewness.  
+We will eliminate these.
+
+```{r}
+calculatedColumns <- grepl('^(mean|var|stddev|max|min|skew|kurt|ampli|avg)', colnames(testing))
+```
+
+Upon initial inspection using `str(testing)` and `summary(testing)`
+we notice that there is no data (either N/A or empty) for some of the 160 variables in the dataset.
+These would *not* make for good predictor variables.
+
+```{r}
+isMissing <- function(x) { any(is.na(x) || x == "")}
+missingValues <- sapply(testing, isMissing)
+```
+
+We will combine the two sets to create our predictor set and exclude them
+alongside some of the columns that don't hold measurement data (e.g. 
+*user_name* or timestamps)
+
+```{r}
+excluded <- c('X', 'user_name', 'new_window', 'num_window', 'cvtd_timestamp',
+              'problem_id', 'raw_timestamp_part_1', 'raw_timestamp_part_2')
+n <- names(testing)
+n <- n[!missingValues | !calculatedColumns]
+predictors <- n[!(n %in% excluded)]
+predictors
+```
+
+These predictors include both "features on the Euler angles (roll, pitch
+and yaw), as well as the raw accelerometer, gyroscope and
+magnetometer readings" ^[1]^.
+
+Let's create three sets of predictors: one that contains only raw data,
+one that contains the angles, and one that contains both and see
+which one yields better results.
+
+```{r}
+pred.angles <- predictors[grepl('roll|pitch|yaw', predictors)]
+pred.raw <- predictors[!grepl('roll|pitch|yaw', predictors)]
+training <- training[,c('classe', predictors)]
+```
+
+
+As we already have a testing set, let's split the training set
+into a training and a validation set. Since the testing set 
+is very small, we'll create a larger validation set.
+
+```{r}
+inTrain <- createDataPartition(training$classe, p = 0.6)
+data.train <- training[inTrain[[1]], ]
+data.validation <- training[-inTrain[[1]], ]
+```
+Distribution of classe observations in the original distribution vs the 
+`data.train` and `data.validation`:
+```{r echo=F}
+g.sec <- function(g) {
+    g + geom_bar() + 
+        guides(fill=F)  + 
+        theme(axis.text.y=element_blank(), axis.ticks.y=element_blank(), axis.title.y=element_blank())
+}
+g1 <- ggplot(training, aes(x=classe, fill=classe)) + geom_bar() + theme(legend.position='none') + ggtitle('Training (original)')
+g2 <- g.sec(ggplot(data.train, aes(x=classe, fill=classe))) + ggtitle("Training")
+g3 <- g.sec(ggplot(data.validation, aes(x=classe, fill=classe))) + ggtitle("Validation")
+grid.arrange(g1, g2, g3, ncol=3)
+
+```
+
+
+
+
+
+
+# References and Citations
+
+
+1. Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
