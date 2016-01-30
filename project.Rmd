@@ -4,7 +4,7 @@ author: "Philip Mateescu"
 date: "January 29, 2016"
 output: html_document
 ---
-```{r echo=FALSE,message=FALSE,warning=FALSE}
+```{r libraries, echo=FALSE,message=FALSE,warning=FALSE}
 library(dplyr)
 library(caret)
 library(pgmm)
@@ -15,6 +15,11 @@ library(forecast)
 library(e1071)
 library(randomForest)
 library(gridExtra)
+library(parallel)
+library(doParallel)
+library(knitr)
+library(reshape2)
+opts_chunk$set(out.width='800px', dpi=200)
 ```
 
 # Using Machine Learning to Predict Exercise Correctness 
@@ -27,6 +32,7 @@ by the weared.
 
 The dataset has been obtained from the [Human Activity Recognition](http://groupware.les.inf.puc-rio.br/har) project.
 
+
 ## Dataset Cleanup and Exploratory Analysis
 
 The training data has been obtained from
@@ -36,7 +42,8 @@ https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
 
 Both files have been places in a `data` subdirectory.
 
-```{r}
+```{r loading_data}
+set.seed(5318008)
 training <- read.csv('data/pml-training.csv')
 training$classe <- as.factor(training$classe)
 testing <- read.csv('data/pml-testing.csv')
@@ -47,7 +54,7 @@ that are calculate values of other variables: mean, variance,
 standard deviation, max, min, amplitude, kurtosis and skewness.  
 We will eliminate these.
 
-```{r}
+```{r calculated_columns}
 calculatedColumns <- grepl('^(mean|var|stddev|max|min|skew|kurt|ampli|avg)', colnames(testing))
 ```
 
@@ -55,7 +62,7 @@ Upon initial inspection using `str(testing)` and `summary(testing)`
 we notice that there is no data (either N/A or empty) for some of the 160 variables in the dataset.
 These would *not* make for good predictor variables.
 
-```{r}
+```{r missing_values}
 isMissing <- function(x) { any(is.na(x) || x == "")}
 missingValues <- sapply(testing, isMissing)
 ```
@@ -64,7 +71,7 @@ We will combine the two sets to create our predictor set and exclude them
 alongside some of the columns that don't hold measurement data (e.g. 
 *user_name* or timestamps)
 
-```{r}
+```{r predictors}
 excluded <- c('X', 'user_name', 'new_window', 'num_window', 'cvtd_timestamp',
               'problem_id', 'raw_timestamp_part_1', 'raw_timestamp_part_2')
 n <- names(testing)
@@ -81,10 +88,14 @@ Let's create three sets of predictors: one that contains only raw data,
 one that contains the angles, and one that contains both and see
 which one yields better results.
 
-```{r}
+```{r predictors_and_formulas}
 pred.angles <- predictors[grepl('roll|pitch|yaw', predictors)]
 pred.raw <- predictors[!grepl('roll|pitch|yaw', predictors)]
 training <- training[,c('classe', predictors)]
+# the formulas we'll use
+formula.all <- 'classe ~ .'
+formula.angles <- paste('classe', '~', paste(pred.angles, collapse ='+'))
+formula.raw <- paste('classe', '~', paste(pred.raw, collapse ='+'))
 ```
 
 
@@ -92,14 +103,14 @@ As we already have a testing set, let's split the training set
 into a training and a validation set. Since the testing set 
 is very small, we'll create a larger validation set.
 
-```{r}
+```{r data_partition}
 inTrain <- createDataPartition(training$classe, p = 0.6)
 data.train <- training[inTrain[[1]], ]
 data.validation <- training[-inTrain[[1]], ]
 ```
 Distribution of classe observations in the original distribution vs the 
 `data.train` and `data.validation`:
-```{r echo=F}
+```{r plot_distribution, echo=F, fig.height=4}
 g.sec <- function(g) {
     g + geom_bar() + 
         guides(fill=F)  + 
@@ -109,9 +120,88 @@ g1 <- ggplot(training, aes(x=classe, fill=classe)) + geom_bar() + theme(legend.p
 g2 <- g.sec(ggplot(data.train, aes(x=classe, fill=classe))) + ggtitle("Training")
 g3 <- g.sec(ggplot(data.validation, aes(x=classe, fill=classe))) + ggtitle("Validation")
 grid.arrange(g1, g2, g3, ncol=3)
-
 ```
 
+## Modeling
+
+```{r models}
+# to allow for succcessive runs, we'll load the models if previously saved
+if (file.exists('models.RData')) { 
+    load(file='models.RData') 
+} else {
+    
+# create a parallel cluster - thanks for Len Greski
+# https://github.com/lgreski/datasciencectacontent/blob/master/markdown/pml-randomForestPerformance.md
+cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(cluster)
+
+control <- trainControl(method='cv', number=5, allowParallel = T)
+model.all <- train(formula(formula.all), data=data.train, method='rf', trControl=control)
+model.angles <- train(formula(formula.angles), data=data.train, method='rf', trControl=control)
+model.raw <- train(formula(formula.raw), data=data.train, method='rf', trControl=control)
+
+stopCluster(cluster)
+# save models for reruns
+save(model.all, model.angles, model.raw, file='models.RData')
+}
+```
+
+Let's compare the accuracy of each of the models:
+```{r predictions}
+predict.all <- predict(model.all, data.validation)
+predict.angles <- predict(model.angles, data.validation)
+predict.raw <- predict(model.raw, data.validation)
+cm.all <- confusionMatrix(data.validation$classe, predict.all)
+cm.angles <- confusionMatrix(data.validation$classe, predict.angles)
+cm.raw <- confusionMatrix(data.validation$classe, predict.raw)
+```
+
+```{r prediction_table, echo=FALSE}
+df.cm <- data.frame(cm.all$overall, cm.angles$overall, cm.raw$overall)
+kable(df.cm, col.names = c('All Predictors (52)', 'Angle Predictors (12)', 'Raw Sensors (40)'), caption = 'Comparison of accuracy for various predictors')
+```
+
+I found it a bit surprising how accurate the angle predictors are;
+at 99.43% they are
+worse than when using all 52 predictors (99.68%),
+but better than the raw sensors (99.32%) which have four times the number of variables.
+
+Indeed, if we examine the variable importance, we notice that the angle
+predictors are prominently present within the top 20 most important variables:
+
+```{r varImp}
+varImp(model.all)
+```
+
+Correlation of predictors predictors:
+```{r correlation_plot, fig.height=8}
+c1.d <-melt(cor(data.train[,predictors]))  
+c2.d <-melt(cor(data.train[,pred.angles]))  
+c1 <- ggplot(data = c1.d, aes(x=Var1, y=Var2, fill=value)) +
+    geom_tile() + 
+    theme(axis.text.x=element_blank(), axis.ticks.x=element_blank(), axis.title.x=element_blank(), axis.title.y=element_blank()) +
+    ggtitle('All 52 Predictors')
+c2 <- ggplot(data = c2.d, aes(x=Var1, y=Var2, fill=value)) +
+    geom_tile() + 
+    theme(axis.text.x=element_blank(), axis.ticks.x=element_blank(), axis.title.x=element_blank(), axis.title.y=element_blank()) + 
+    ggtitle('Angle Predictors')
+grid.arrange(c1, c2, nrow=2)
+```
+
+
+# Prediction on Test Data
+
+```{r}
+testing <- testing[,predictors]
+pred.test.all <- predict(model.all, newdata = testing)
+pred.test.angles <- predict(model.angles, newdata = testing)
+pred.test.raw <- predict(model.raw, newdata = testing)
+df.pred <- data.frame(all=pred.test.all, angles=pred.test.angles, sensors=pred.test.raw)
+kable(df.pred)
+```
+
+As we can see, due to the high accuracy of the Random Forest algorithm all
+three models concur when applied to the test data.
 
 
 
