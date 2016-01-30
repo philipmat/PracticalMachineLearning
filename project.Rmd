@@ -146,7 +146,10 @@ save(model.all, model.angles, model.raw, file='models.RData')
 }
 ```
 
-Let's compare the accuracy of each of the models:
+## Accuracy of Models
+
+Let's compare the accuracy of each of the models 
+by running predictions against the validation set:
 ```{r predictions}
 predict.all <- predict(model.all, data.validation)
 predict.angles <- predict(model.angles, data.validation)
@@ -157,8 +160,15 @@ cm.raw <- confusionMatrix(data.validation$classe, predict.raw)
 ```
 
 ```{r prediction_table, echo=FALSE}
-df.cm <- data.frame(cm.all$overall, cm.angles$overall, cm.raw$overall)
-kable(df.cm, col.names = c('All Predictors (52)', 'Angle Predictors (12)', 'Raw Sensors (40)'), caption = 'Comparison of accuracy for various predictors')
+acc.all <- cm.all$overall[[1]] * 100
+acc.angles <- cm.angles$overall[[1]] * 100
+acc.raw <- cm.raw$overall[[1]] * 100
+df.cm <- data.frame(all=c(acc.all, 100-acc.all), angle=c(acc.angles, 100 - acc.angles), sensors=c(acc.raw, 100 - acc.raw))
+rownames(df.cm) <- c('Accuracy', 'Out-of-sample error')
+kable(df.cm, 
+      col.names = c('All Predictors (52)', 'Angle Predictors (12)', 'Raw Sensors (40)'),
+      row.names = TRUE,
+      caption = 'Comparison of Accuracy and Out-Of-Sample Error for various predictors')
 ```
 
 I found it a bit surprising how accurate the angle predictors are;

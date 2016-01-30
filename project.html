@@ -146,7 +146,10 @@ stopCluster(cluster)
 # save models for reruns
 save(model.all, model.angles, model.raw, file='models.RData')
 }</code></pre>
-<p>Let’s compare the accuracy of each of the models:</p>
+</div>
+<div id="accuracy-of-models" class="section level2">
+<h2>Accuracy of Models</h2>
+<p>Let’s compare the accuracy of each of the models by running predictions against the validation set:</p>
 <pre class="r"><code>predict.all &lt;- predict(model.all, data.validation)
 predict.angles &lt;- predict(model.angles, data.validation)
 predict.raw &lt;- predict(model.raw, data.validation)
@@ -154,7 +157,7 @@ cm.all &lt;- confusionMatrix(data.validation$classe, predict.all)
 cm.angles &lt;- confusionMatrix(data.validation$classe, predict.angles)
 cm.raw &lt;- confusionMatrix(data.validation$classe, predict.raw)</code></pre>
 <table>
-<caption>Comparison of accuracy for various predictors</caption>
+<caption>Comparison of Accuracy and Out-Of-Sample Error for various predictors</caption>
 <thead>
 <tr class="header">
 <th align="left"></th>
@@ -166,45 +169,15 @@ cm.raw &lt;- confusionMatrix(data.validation$classe, predict.raw)</code></pre>
 <tbody>
 <tr class="odd">
 <td align="left">Accuracy</td>
-<td align="right">0.9968137</td>
-<td align="right">0.9943920</td>
-<td align="right">0.9932450</td>
+<td align="right">99.6813663</td>
+<td align="right">99.4392047</td>
+<td align="right">99.3244966</td>
 </tr>
 <tr class="even">
-<td align="left">Kappa</td>
-<td align="right">0.9959697</td>
-<td align="right">0.9929069</td>
-<td align="right">0.9914553</td>
-</tr>
-<tr class="odd">
-<td align="left">AccuracyLower</td>
-<td align="right">0.9952999</td>
-<td align="right">0.9924788</td>
-<td align="right">0.9911734</td>
-</tr>
-<tr class="even">
-<td align="left">AccuracyUpper</td>
-<td align="right">0.9979369</td>
-<td align="right">0.9959224</td>
-<td align="right">0.9949360</td>
-</tr>
-<tr class="odd">
-<td align="left">AccuracyNull</td>
-<td align="right">0.2844762</td>
-<td align="right">0.2846036</td>
-<td align="right">0.2848585</td>
-</tr>
-<tr class="even">
-<td align="left">AccuracyPValue</td>
-<td align="right">0.0000000</td>
-<td align="right">0.0000000</td>
-<td align="right">0.0000000</td>
-</tr>
-<tr class="odd">
-<td align="left">McnemarPValue</td>
-<td align="right">NaN</td>
-<td align="right">NaN</td>
-<td align="right">NaN</td>
+<td align="left">Out-of-sample error</td>
+<td align="right">0.3186337</td>
+<td align="right">0.5607953</td>
+<td align="right">0.6755034</td>
 </tr>
 </tbody>
 </table>
